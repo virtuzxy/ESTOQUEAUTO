@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Controle de Estoque</title>
+    <!-- Bootstrap para layout responsivo -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome para ícones -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Plotly.js para gráficos -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <!-- DataTables para tabelas interativas -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+    <!-- jsPDF para geração de PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- PapaParse para CSV -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- SheetJS para Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #17a2b8; /* Cyan para variar do azul */
+            --secondary-color: #6c757d;
+            --success-color: #28a745;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+            --info-color: #0dcaf0; /* Azul claro alternativo */
+            --light-bg: #f8f9fa;
+            --dark-bg: #343a40;
+            --card-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            --border-radius: 15px;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, var(--light-bg) 0%, #e9ecef 100%);
+            color: #333;
+            transition: background 0.3s, color 0.3s;
+        }
+        .dark-mode {
+            background: linear-gradient(135deg, var(--dark-bg) 0%, #495057 100%);
+            color: #fff;
+        }
+        .sidebar {
+            background: linear-gradient(135deg, var(--dark-bg) 0%, #495057 100%);
+            color: white;
+            padding: 20px;
+            height: 100vh;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+        }
+        .sidebar h4 {
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        .card {
+            border-radius: var(--border-radius);
+            box-shadow: var(--card-shadow);
+            transition: transform 0.2s, box-shadow 0.2s;
+            border: none;
+            overflow: hidden;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        }
+        .card-header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, #138496 100%); /* Gradiente com tom mais escuro */
+            color: white;
+            font-weight: bold;
+        }
+        .status-baixo { background-color: var(--danger-color); color: white; padding: 4px 8px; border-radius: 8px; display: inline-block; }
+        .status-limite { background-color: var(--warning-color); color: black; padding: 4px 8px; border-radius: 8px; display: inline-block; }
+        .status-saudavel { background-color: var(--success-color); color: white; padding: 4px 8px; border-radius: 8px; display: inline-block; }
+        .chart-container { height: 400px; border-radius: var(--border-radius); overflow: hidden; }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary-color) 0%, #138496 100%);
+            border: none;
+            border-radius: var(--border-radius);
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #138496 0%, var(--primary-color) 100%);
+        }
+        .table th {
+            background-color: var(--primary-color);
+            color: white;
+        }
+        .table-striped tbody tr:nth-of-type(odd) {
+            background-color: rgba(23, 162, 184, 0.1); /* Usando o cyan com transparência */
+        }
+        .loading {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .toggle-mode {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            z-index: 10;
+        }
+        @media (max-width: 768px) {
+            .sidebar {
+                height: auto;
+                position: relative;
+            }
+            .row {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <button class="toggle-mode" id="toggleMode"><i class="fas fa-moon"></i></button>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-3 sidebar">
+                <h4><i class="fas fa-filter"></i> Filtros</h4>
+                <input type="file" id="fileInput" class="form-control mb-3" accept=".csv,.xlsx,.xls" title="Faça upload do arquivo Excel/CSV">
+                <input type="text" id="searchInput" class="form-control mb-3" placeholder="Buscar produto" title="Digite o nome do produto">
+                <select id="statusFilter" class="form-select mb-3" multiple title="Selecione os status para filtrar">
+                    <option value="Baixo" selected>Baixo</option>
+                    <option value="Limite" selected>Limite</option>
+                    <option value="Saudável" selected>Saudável</option>
+                </select>
+                <button id="generatePdf" class="btn btn-primary w-100"><i class="fas fa-file-pdf"></i> Gerar Relatório PDF</button>
+            </div>
+            <!-- Main Content -->
+            <div class="col-md-9">
+                <h1 class="mt-4"><i class="fas fa-boxes"></i> Dashboard de Controle de Estoque</h1>
+                <p>Um dashboard moderno para gerenciar seu estoque, focado em evitar faltas e sobras.</p>
+                
+                <!-- Loading Spinner -->
+                <div class="loading" id="loading">
+                    <div class="spinner"></div>
+                </div>
+                
+                <!-- KPIs -->
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-header">
+                                <i class="fas fa-list"></i> Total de Produtos
+                            </div>
+                            <div class="card-body">
+                                <h5 class="card-title" id="kpiTotalProdutos">0</h5>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-header">
+                                <i class="fas fa-cubes"></i> Quantidade Total
+                            </div>
+                            <div class="card-body">
+                                <h5 class="card-title" id="kpiQuantidadeTotal">0</h5>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-header">
+                                <i class="fas fa-dollar-sign"></i> Valor Total
+                            </div>
+                            <div class="card-body">
+                                <h5 class="card-title" id="kpiValorTotal">R$ 0,00</h5>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-header">
+                                <i class="fas fa-exclamation-triangle"></i> Itens Abaixo Mínimo
+                            </div>
+                            <div class="card-body">
+                                <h5 class="card-title" id="kpiAbaixoMinimo">0</h5>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Tabelas -->
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fas fa-table"></i> Tabela Geral
+                            </div>
+                            <div class="card-body">
+                                <table id="tabelaGeral" class="table table-striped table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>Nome</th>
+                                            <th>Quantidade</th>
+                                            <th>Mínimo</th>
+                                            <th>Compra</th>
+                                            <th>Venda</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fas fa-times-circle"></i> Produtos em Falta
+                            </div>
+                            <div class="card-body">
+                                <table id="tabelaFalta" class="table table-striped table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>Nome</th>
+                                            <th>Quantidade</th>
+                                            <th>Mínimo</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="card mt-3">
+                            <div class="card-header">
+                                <i class="fas fa-clock"></i> Produtos Encalhados
+                            </div>
+                            <div class="card-body">
+                                <table id="tabelaEncalhado" class="table table-striped table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>Nome</th>
+                                            <th>Última Movimentação</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Gráficos -->
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fas fa-chart-bar"></i> Produtos com Menor Estoque
+                            </div>
+                            <div class="card-body">
+                                <div id="chartBarras" class="chart-container"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fas fa-chart-pie"></i> Percentual de Itens
+                            </div>
+                            <div class="card-body">
+                                <div id="chartPizza" class="chart-container"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fas fa-chart-line"></i> Evolução do Valor
+                            </div>
+                            <div class="card-body">
+                                <div id="chartLinha" class="chart-container"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let data = []; // Dados carregados
+        let isDarkMode = false;
+
+        // Pegar cores definidas no :root para usar no JS
+        const rootStyles = getComputedStyle(document.documentElement);
+        const primaryColor = rootStyles.getPropertyValue('--primary-color').trim() || '#17a2b8';
+        const successColor = rootStyles.getPropertyValue('--success-color').trim() || '#28a745';
+        const warningColor = rootStyles.getPropertyValue('--warning-color').trim() || '#ffc107';
+        const dangerColor = rootStyles.getPropertyValue('--danger-color').trim() || '#dc3545';
+
+        // Toggle Dark Mode
+        document.getElementById('toggleMode').addEventListener('click', function() {
+            isDarkMode = !isDarkMode;
+            document.body.classList.toggle('dark-mode');
+            this.innerHTML = isDarkMode ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
+        });
+
+        // Função utilitária para mapear status para classes (evita problemas com acentos)
+        function statusToClass(status) {
+            if (!status) return '';
+            const s = status.toLowerCase();
+            if (s.includes('baixo')) return 'status-baixo';
+            if (s.includes('limite')) return 'status-limite';
+            // tratar "saudavel" com ou sem acento
+            if (s.includes('saud') || s.includes('saudável') || s.includes('saudavel')) return 'status-saudavel';
+            return '';
+        }
+
+        // Função para formatar moeda BRL
+        function formatBRL(value) {
+            return 'R$ ' + Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        // Ler arquivo enviado
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                document.getElementById('loading').style.display = 'block';
+                const reader = new FileReader();
+
+                // decidir modo de leitura conforme extensão
+                const isCsv = file.name.toLowerCase().endsWith('.csv');
+
+                reader.onload = function(ev) {
+                    let df = [];
+                    try {
+                        if (isCsv) {
+                            Papa.parse(ev.target.result, {
+                                header: true,
+                                skipEmptyLines: true,
+                                complete: function(results) {
+                                    df = results.data;
+                                    processData(df);
+                                },
+                                error: function(err) {
+                                    console.error('Erro ao parsear CSV', err);
+                                    alert('Erro ao ler CSV. Verifique o arquivo.');
+                                    document.getElementById('loading').style.display = 'none';
+                                }
+                            });
+                        } else {
+                            // XLSX: se usar readAsBinaryString, result já é string binária
+                            const workbook = XLSX.read(ev.target.result, {type: 'binary'});
+                            const sheetName = workbook.SheetNames[0];
+                            const worksheet = workbook.Sheets[sheetName];
+                            df = XLSX.utils.sheet_to_json(worksheet, {defval: ''});
+                            processData(df);
+                        }
+                    } catch (err) {
+                        console.error('Erro ao processar arquivo', err);
+                        alert('Erro ao processar o arquivo. Veja o console para mais detalhes.');
+                        document.getElementById('loading').style.display = 'none';
+                    }
+                };
+
+                // ler como texto para CSV, como binary para xlsx
+                if (isCsv) {
+                    reader.readAsText(file, 'UTF-8');
+                } else {
+                    // readAsBinaryString funciona na maioria dos navegadores ainda; mantive para compatibilidade com SheetJS
+                    reader.readAsBinaryString(file);
+                }
+            }
+        });
+
+        // Processar dados: normalizar colunas e calcular status/encalhado
+        function processData(df) {
+            // df é array de objetos com chaves do cabeçalho
+            data = df.map(row => {
+                // aceitar variações nos nomes das colunas (por precaução)
+                const nome = row['Nome do produto'] || row['Nome'] || row['nome'] || row['Produto'] || '';
+                const qtdRaw = row['Quantidade atual'] ?? row['Quantidade'] ?? row['qtd'] ?? row['quantidade'] ?? 0;
+                const minimoRaw = row['Estoque mínimo'] ?? row['Minimo'] ?? row['mínimo'] ?? row['estoque_minimo'] ?? 0;
+                const compraRaw = row['Preço de compra'] ?? row['Preco de compra'] ?? row['Compra'] ?? row['custo'] ?? 0;
+                const vendaRaw = row['Preço de venda'] ?? row['Preco de venda'] ?? row['Venda'] ?? 0;
+                const ultimaRaw = row['Última movimentação'] ?? row['Ultima movimentacao'] ?? row['Última movimentação'] ?? row['ultima'] ?? row['Última'] ?? '';
+
+                const quantidade = Number(String(qtdRaw).replace(',', '.')) || 0;
+                const minimo = Number(String(minimoRaw).replace(',', '.')) || 0;
+                const compra = Number(String(compraRaw).replace(',', '.')) || 0;
+                const venda = Number(String(vendaRaw).replace(',', '.')) || 0;
+                let ultimaMov = null;
+                if (ultimaRaw) {
+                    const parsed = new Date(ultimaRaw);
+                    if (!isNaN(parsed)) ultimaMov = parsed;
+                }
+
+                const status = (quantidade < minimo) ? 'Baixo' : (quantidade < minimo * 1.2) ? 'Limite' : 'Saudável';
+                const encalhado = ultimaMov ? ((new Date() - ultimaMov) > 90 * 24 * 60 * 60 * 1000) : false;
+
+                return {
+                    nome,
+                    quantidade,
+                    minimo,
+                    compra,
+                    venda,
+                    ultimaMov,
+                    status,
+                    encalhado
+                };
+            });
+
+            document.getElementById('loading').style.display = 'none';
+            updateDashboard();
+        }
+
+        // Atualizar dashboard
+        function updateDashboard() {
+            // KPIs
+            document.getElementById('kpiTotalProdutos').textContent = data.length;
+            const totalQuantidade = data.reduce((sum, row) => sum + (Number(row.quantidade) || 0), 0);
+            document.getElementById('kpiQuantidadeTotal').textContent = totalQuantidade;
+            const valorTotal = data.reduce((sum, row) => sum + ((Number(row.quantidade) || 0) * (Number(row.compra) || 0)), 0);
+            document.getElementById('kpiValorTotal').textContent = formatBRL(valorTotal);
+            document.getElementById('kpiAbaixoMinimo').textContent = data.filter(row => row.quantidade < row.minimo).length;
+
+            // Tabelas
+            updateTable('tabelaGeral', data, ['nome', 'quantidade', 'minimo', 'compra', 'venda', 'status']);
+            updateTable('tabelaFalta', data.filter(row => row.quantidade < row.minimo), ['nome', 'quantidade', 'minimo']);
+            updateTable('tabelaEncalhado', data.filter(row => row.encalhado), ['nome', 'ultimaMov']);
+
+            // Gráficos
+            updateCharts();
+        }
+
+        // Atualizar tabela (com destruição segura do DataTable existente)
+        function updateTable(tableId, rows, columns) {
+            const $table = $(`#${tableId}`);
+
+            // Se já existe, destrói antes de trocar o tbody
+            if ($.fn.DataTable.isDataTable(`#${tableId}`)) {
+                $table.DataTable().clear().destroy();
+            }
+
+            const tbody = document.querySelector(`#${tableId} tbody`);
+            tbody.innerHTML = '';
+
+            rows.forEach(row => {
+                const tr = document.createElement('tr');
+                columns.forEach(col => {
+                    const td = document.createElement('td');
+                    if (col === 'status') {
+                        const cls = statusToClass(row[col]);
+                        const span = document.createElement('span');
+                        span.className = cls;
+                        span.textContent = row[col];
+                        td.appendChild(span);
+                    } else {
+                        // formata datas e números adequadamente
+                        const val = row[col];
+                        if (val instanceof Date) {
+                            td.textContent = val.toLocaleDateString();
+                        } else if (col === 'compra' || col === 'venda') {
+                            td.textContent = formatBRL(val);
+                        } else if (col === 'quantidade' || col === 'minimo') {
+                            td.textContent = Number(val).toLocaleString('pt-BR');
+                        } else {
+                            td.textContent = val ?? '';
+                        }
+                    }
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+
+            // Inicializar DataTable
+            $table.DataTable({
+                destroy: true,
+                pageLength: 5,
+                lengthChange: false,
+                ordering: true,
+                language: {
+                    url: "//cdn.datatables.net/plug-ins/1.13.4/i18n/pt-BR.json"
+                }
+            });
+        }
+
+        // Atualizar gráficos com Plotly
+        function updateCharts() {
+            // evitar alterar data original com sort
+            const barrasData = [...data].sort((a, b) => a.quantidade - b.quantidade).slice(0, 10);
+
+            const traceBarras = {
+                x: barrasData.map(d => d.nome),
+                y: barrasData.map(d => d.quantidade),
+                type: 'bar',
+                marker: { color: primaryColor }
+            };
+            Plotly.newPlot('chartBarras', [traceBarras], { responsive: true, margin: { t: 30 } });
+
+            // Pizza: abaixo vs dentro
+            const abaixo = data.filter(d => d.quantidade < d.minimo).length;
+            const dentro = data.length - abaixo;
+            const tracePizza = {
+                values: [abaixo, dentro],
+                labels: ['Abaixo do Mínimo', 'Dentro do Estoque'],
+                type: 'pie',
+                marker: { colors: [dangerColor, successColor] },
+                textinfo: 'label+percent'
+            };
+            Plotly.newPlot('chartPizza', [tracePizza], { responsive: true, margin: { t: 30 } });
+
+            // Linha (simulada a partir do valor total para 30 dias)
+            const dates = [];
+            const values = [];
+            // gerar série (30 dias) baseada no valor atual, com pequena variação aleatória
+            const baseValor = data.reduce((sum, row) => sum + (row.quantidade * row.compra), 0);
+            for (let i = 29; i >= 0; i--) {
+                const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+                dates.push(d);
+                // variação simples para dar sensação de histórico
+                const jitter = (Math.random() - 0.5) * (baseValor * 0.02);
+                values.push(Math.max(0, baseValor + jitter));
+            }
+            const traceLinha = {
+                x: dates,
+                y: values,
+                type: 'scatter',
+                mode: 'lines',
+                line: { color: primaryColor }
+            };
+            Plotly.newPlot('chartLinha', [traceLinha], { responsive: true, margin: { t: 30 } });
+        }
+
+        // Gerar PDF simples (exemplo usando jsPDF)
+        document.getElementById('generatePdf').addEventListener('click', async function() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('p', 'pt', 'a4');
+            doc.setFontSize(14);
+            doc.text('Relatório de Estoque - Flux Dash', 40, 50);
+
+            // KPIs
+            doc.setFontSize(11);
+            doc.text(`Total produtos: ${data.length}`, 40, 80);
+            const totalQuantidade = data.reduce((s, r) => s + (r.quantidade || 0), 0);
+            doc.text(`Quantidade total: ${totalQuantidade}`, 40, 100);
+            const valorTotal = data.reduce((s, r) => s + ((r.quantidade || 0) * (r.compra || 0)), 0);
+            doc.text(`Valor total: ${formatBRL(valorTotal)}`, 40, 120);
+            doc.text(`Itens abaixo do mínimo: ${data.filter(r => r.quantidade < r.minimo).length}`, 40, 140);
+
+            // Simples tabela com primeiros 10 produtos
+            doc.setFontSize(10);
+            let startY = 170;
+            doc.text('Produtos (exemplo)', 40, startY);
+            startY += 10;
+            const headers = ['Nome', 'Qtd', 'Mínimo', 'Compra'];
+            const rows = data.slice(0, 10).map(r => [r.nome, String(r.quantidade), String(r.minimo), formatBRL(r.compra)]);
+            // desenhar tabela simples
+            let y = startY + 10;
+            rows.forEach(row => {
+                doc.text(row.join(' | '), 40, y);
+                y += 14;
+                if (y > 750) {
+                    doc.addPage();
+                    y = 40;
+                }
+            });
+
+            doc.save('relatorio_estoque.pdf');
+        });
+
+        // Busca por nome e filtro de status
+        document.getElementById('searchInput').addEventListener('input', function() {
+            const q = this.value.trim().toLowerCase();
+            const filtered = data.filter(d => d.nome.toLowerCase().includes(q));
+            // aplicar também status selecionado
+            const selected = Array.from(document.getElementById('statusFilter').selectedOptions).map(o => o.value);
+            const final = filtered.filter(d => selected.includes(d.status));
+            updateTable('tabelaGeral', final, ['nome', 'quantidade', 'minimo', 'compra', 'venda', 'status']);
+        });
+
+        // atualização quando muda seleção de status
+        document.getElementById('statusFilter').addEventListener('change', function() {
+            const q = document.getElementById('searchInput').value.trim().toLowerCase();
+            const selected = Array.from(this.selectedOptions).map(o => o.value);
+            const filtered = data.filter(d => d.nome.toLowerCase().includes(q) && selected.includes(d.status));
+            updateTable('tabelaGeral', filtered, ['nome', 'quantidade', 'minimo', 'compra', 'venda', 'status']);
+        });
+
+        // Para inicializar com exemplo (opcional): cria alguns dados de exemplo se quiser testar sem upload
+        (function seedExample() {
+            // se não quiser, comente este bloco
+            const exemplo = [
+                { 'Nome do produto': 'Arroz', 'Quantidade atual': 120, 'Estoque mínimo': 30, 'Preço de compra': 10.50, 'Preço de venda': 15.00, 'Última movimentação': '2025-11-01' },
+                { 'Nome do produto': 'Feijão', 'Quantidade atual': 50, 'Estoque mínimo': 40, 'Preço de compra': 8.00, 'Preço de venda': 12.00, 'Última movimentação': '2025-08-01' },
+                { 'Nome do produto': 'Café', 'Quantidade atual': 10, 'Estoque mínimo': 20, 'Preço de compra': 20.00, 'Preço de venda': 30.00, 'Última movimentação': '2025-02-10' },
+                { 'Nome do produto': 'Detergente', 'Quantidade atual': 200, 'Estoque mínimo': 50, 'Preço de compra': 2.50, 'Preço de venda': 5.00, 'Última movimentação': '2025-11-20' },
+                { 'Nome do produto': 'Placa mãe', 'Quantidade atual': 5, 'Estoque mínimo': 2, 'Preço de compra': 400.00, 'Preço de venda': 600.00, 'Última movimentação': '2025-09-10' },
+                { 'Nome do produto': 'Teclado', 'Quantidade atual': 15, 'Estoque mínimo': 10, 'Preço de compra': 50.00, 'Preço de venda': 80.00, 'Última movimentação': '2025-10-01' },
+                { 'Nome do produto': 'Mouse', 'Quantidade atual': 8, 'Estoque mínimo': 10, 'Preço de compra': 20.00, 'Preço de venda': 35.00, 'Última movimentação': '2025-07-10' }
+            ];
+            // processa exemplo apenas se não houver dados carregados (útil para demo rápida)
+            if (data.length === 0) processData(exemplo);
+        })();
+
+    </script>
+</body>
+</html>
